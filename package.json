@@ -2,9 +2,9 @@
   "name": "project-m",
   "version": "1.0.0",
   "description": "Discord Music Bot - Project M",
-  "main": "src/bot.js", // Đảm bảo đúng đường dẫn file chính của bot
+  "main": "src/bot.js", 
   "scripts": {
-    "start": "node src/bot.js", // Lệnh để Render chạy ứng dụng
+    "start": "node src/bot.js", 
     "deploy-commands": "node deploy-commands.js"
   },
   "keywords": [],
