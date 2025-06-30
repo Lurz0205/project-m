@@ -1,6 +1,6 @@
 //...src/modules/audioManager.js
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
-const ffmpeg = require('ffmpeg-static'); // Đảm bảo ffmpeg-static được cài đặt
+const ffmpeg = require('ffmpeg-static');
 const playdl = require('play-dl');
 
 /**
@@ -34,55 +34,39 @@ class AudioManager {
             });
 
             this.connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
-                if (newState.reason === 'channelDeleted') { // Nếu kênh bị xóa, dừng bot
+                const queueManager = this.client.queueManagers.get(this.guildId);
+
+                if (newState.reason === 'channelDeleted') {
                     console.log(`[AUDIO] Kênh thoại ${voiceChannel.name} đã bị xóa. Dừng bot.`);
                     this.stop();
                     this._emitPlaybackStatus('stopped');
                     this._emitVoiceConnectionStatus('disconnected');
                     return;
                 }
-                if (newState.reason === 'left' && !this.client.queueManagers.get(this.guildId)?.is247()) {
+                // Nếu bị ngắt kết nối mà không phải do kênh bị xóa, và không ở chế độ 24/7
+                if (newState.reason === 'left' || (newState.status === VoiceConnectionStatus.Disconnected && !queueManager?.is247())) {
                     console.log(`[AUDIO] Bot đã bị ngắt kết nối khỏi kênh thoại. Dừng bot.`);
                     this.stop();
                     this._emitPlaybackStatus('stopped');
                     this._emitVoiceConnectionStatus('disconnected');
                     return;
                 }
-                // Tự động kết nối lại nếu không phải do bị đá hoặc kênh bị xóa, và không ở chế độ 24/7
-                if (newState.status === VoiceConnectionStatus.Disconnected && !this.client.queueManagers.get(this.guildId)?.is247()) {
-                    if (newState.reason === 'websocketClose' && newState.closeCode === 4014) {
-                        try {
-                            await voiceChannel.guild.members.me.voice.setChannel(null); // Leave current voice channel
-                            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait a bit
-                            this.connection = joinVoiceChannel({
-                                channelId: voiceChannel.id,
-                                guildId: voiceChannel.guild.id,
-                                adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-                            });
-                            console.log(`[AUDIO] Đã kết nối lại thành công sau lỗi 4014.`);
-                            this._emitVoiceConnectionStatus('connected');
-                        } catch (error) {
-                            console.error(`[AUDIO] Không thể kết nối lại sau lỗi 4014: ${error.message}`);
-                            this.stop();
-                            this._emitPlaybackStatus('stopped');
-                            this._emitVoiceConnectionStatus('disconnected');
-                        }
-                    } else if (newState.reason === 'timeout') {
-                         console.log(`[AUDIO] Bot bị ngắt kết nối do timeout. Thử kết nối lại...`);
-                         try {
-                             this.connection = joinVoiceChannel({
-                                 channelId: voiceChannel.id,
-                                 guildId: voiceChannel.guild.id,
-                                 adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-                             });
-                             console.log(`[AUDIO] Đã kết nối lại thành công sau timeout.`);
-                             this._emitVoiceConnectionStatus('connected');
-                         } catch (error) {
-                             console.error(`[AUDIO] Không thể kết nối lại sau timeout: ${error.message}`);
-                             this.stop();
-                             this._emitPlaybackStatus('stopped');
-                             this._emitVoiceConnectionStatus('disconnected');
-                         }
+                // Tự động kết nối lại nếu bị ngắt kết nối không mong muốn và đang ở chế độ 24/7
+                if (newState.status === VoiceConnectionStatus.Disconnected && queueManager?.is247()) {
+                    console.log(`[AUDIO] Bot bị ngắt kết nối trong chế độ 24/7. Thử kết nối lại...`);
+                    try {
+                        this.connection = joinVoiceChannel({
+                            channelId: voiceChannel.id,
+                            guildId: voiceChannel.guild.id,
+                            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+                        });
+                        console.log(`[AUDIO] Đã kết nối lại thành công.`);
+                        this._emitVoiceConnectionStatus('connected');
+                    } catch (error) {
+                        console.error(`[AUDIO] Không thể kết nối lại: ${error.message}`);
+                        this.stop(); // Dừng nếu không thể kết nối lại
+                        this._emitPlaybackStatus('stopped');
+                        this._emitVoiceConnectionStatus('disconnected');
                     }
                 }
             });
@@ -111,25 +95,35 @@ class AudioManager {
             this.player = createAudioPlayer();
             this.player.on(AudioPlayerStatus.Idle, async () => {
                 const queueManager = this.client.queueManagers.get(this.guildId);
-                if (!queueManager) return;
+                if (!queueManager) {
+                    this.stop(); // Không có queueManager, dừng bot
+                    return;
+                }
 
-                const nextSong = queueManager.nextSong();
+                const nextSong = queueManager.nextSong(); // Lấy bài hát tiếp theo, đã xử lý loopMode
+
                 if (nextSong) {
                     this.setNowPlaying(nextSong);
                     this.player.play(nextSong.resource);
                     this._emitPlaybackStatus('playing');
                 } else if (queueManager.is247()) {
-                    this.setNowPlaying(null); // Không có bài hát nào đang phát
-                    this._emitPlaybackStatus('idle'); // Bot vẫn ở trong kênh thoại nhưng không phát
+                    this.setNowPlaying(null); // Bot vẫn ở trong kênh thoại nhưng không phát nhạc
+                    this._emitPlaybackStatus('idle');
+                    // Gửi thông báo đến kênh Discord nếu cần
+                    const guild = this.client.guilds.cache.get(this.guildId);
+                    if (guild) {
+                        const channel = guild.channels.cache.find(c => c.type === 0 && c.members.has(this.client.user.id)); // Kênh văn bản bot đang ở
+                        if (channel) {
+                             // channel.send('Hàng chờ trống, nhưng bot vẫn ở trong kênh (chế độ 24/7).');
+                        }
+                    }
                 } else if (queueManager.isAutoplay()) {
-                    // TODO: Implement autoplay logic here
-                    // This would involve searching for a related song and adding it to the queue
-                    console.log('[AUDIO] Autoplay: đang tìm bài hát liên quan...');
-                    // For now, just stop if autoplay not fully implemented
+                    // TODO: Implement autoplay logic here (tìm bài hát liên quan)
+                    // For now, just stop if autoplay is not fully implemented
+                    console.log('[AUDIO] Autoplay: đang tìm bài hát liên quan (chưa triển khai đầy đủ)...');
                     this.stop();
                     this._emitPlaybackStatus('stopped');
-                }
-                else {
+                } else {
                     this.stop(); // Dừng và thoát kênh nếu không còn bài hát nào và không có 24/7
                     this._emitPlaybackStatus('stopped');
                 }
@@ -138,7 +132,6 @@ class AudioManager {
             this.player.on('error', error => {
                 console.error(`[AUDIO] Lỗi AudioPlayer: ${error.message}`, error);
                 this._emitPlaybackStatus('error');
-                // Try to play next song or stop
                 const queueManager = this.client.queueManagers.get(this.guildId);
                 if (queueManager) {
                     const nextSong = queueManager.nextSong();
@@ -155,6 +148,12 @@ class AudioManager {
             this.connection.subscribe(this.player);
         }
 
+        // Đảm bảo resource có inlineVolume để điều chỉnh âm lượng
+        if (!song.resource.volume) {
+             song.resource = createAudioResource(song.resource.stream, { inputType: song.resource.inputType, inlineVolume: true });
+        }
+        song.resource.volume.setVolume(this.volume / 100); // Áp dụng âm lượng hiện tại
+
         this.player.play(song.resource);
         this.setNowPlaying(song);
         this.isPlayingAudio = true;
@@ -167,7 +166,7 @@ class AudioManager {
     async skip() {
         if (this.player && this.player.state.status !== AudioPlayerStatus.Idle) {
             this.player.stop(); // Chuyển player sang trạng thái Idle, kích hoạt logic nextSong
-            this.isPlayingAudio = false;
+            this.isPlayingAudio = false; // Sẽ được đặt lại thành true nếu có bài tiếp theo
             this._emitPlaybackStatus('skipped');
             return true;
         }
@@ -218,6 +217,7 @@ class AudioManager {
             queueManager.setNowPlaying(null);
             queueManager.set247(false); // Reset 24/7 mode
             queueManager.setAutoplay(false); // Reset autoplay mode
+            queueManager.setLoopMode('off'); // Reset loop mode
         }
         this.client.audioManagers.delete(this.guildId); // Xóa khỏi danh sách audioManagers
         this.client.queueManagers.delete(this.guildId); // Xóa khỏi danh sách queueManagers
@@ -267,10 +267,13 @@ class AudioManager {
             });
             resource.volume.setVolume(this.volume / 100); // Áp dụng lại volume hiện tại
 
-            currentSong.resource = resource; // Cập nhật resource trong bài hát hiện tại
+            // Gán lại resource mới cho bài hát hiện tại trong QueueManager
+            currentSong.resource = resource; 
+            // Sau khi seek, bài hát hiện tại vẫn là bài đó, không cần gọi queueManager.setNowPlaying()
+            // chỉ cần play lại resource mới
             this.player.play(resource);
             this.isPlayingAudio = true;
-            this._emitPlaybackStatus('seeking'); // Có thể thêm trạng thái "seeking"
+            this._emitPlaybackStatus('playing'); // Sau khi seek, bot đang phát
             return true;
         } catch (error) {
             console.error(`[AUDIO] Lỗi khi tua nhạc: ${error.message}`);
@@ -284,18 +287,6 @@ class AudioManager {
      */
     isPlaying() {
         return this.isPlayingAudio;
-    }
-
-    /**
-     * Thiết lập bài hát hiện đang phát trong QueueManager.
-     * @param {Object} song - Đối tượng bài hát.
-     */
-    setNowPlaying(song) {
-        const queueManager = this.client.queueManagers.get(this.guildId);
-        if (queueManager) {
-            queueManager.setNowPlaying(song);
-        }
-        this._emitPlaybackStatus('playing'); // Phát thành công
     }
 
     /**
@@ -327,7 +318,6 @@ class AudioManager {
         }
     }
 
-    // Khi bot khởi động, các guild đã có có thể cần AudioManager
     static getOrCreate(guildId, client, io) {
         if (!client.audioManagers.has(guildId)) {
             client.audioManagers.set(guildId, new AudioManager(guildId, io, client));
