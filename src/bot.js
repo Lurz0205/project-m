@@ -1,44 +1,112 @@
 //...src/bot.js
-// Đây là phiên bản bot tối giản chỉ để debug lỗi khởi động trên Render.
-// KHÔNG CÓ CÁC CHỨC NĂNG NHẠC, WEB DASHBOARD, HOẶC LỆNH NÀO KHÁC.
-
-const { Client, GatewayIntentBits } = require('discord.js');
-// Đảm bảo thư viện dotenv đã được cài đặt và hoạt động để đọc biến môi trường
+const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const { readdirSync } = require('fs');
 require('dotenv').config();
 
-console.log('[DEBUG_MINIMAL] Bắt đầu khởi tạo bot TỐI GIẢN...');
-console.log(`[DEBUG_MINIMAL] Discord Token đọc được: ${process.env.DISCORD_TOKEN ? 'CÓ' : 'KHÔNG'}`);
-console.log(`[DEBUG_MINIMAL] Discord Client ID đọc được: ${process.env.DISCORD_CLIENT_ID ? 'CÓ' : 'KHÔNG'}`);
+console.log('[DEBUG] Bắt đầu khởi tạo bot.js (phiên bản tối giản)...');
+
+// Khởi tạo các module quản lý
+// KHÔNG CÓ EXPRESS, SOCKET.IO ở đây
+const QueueManager = require('./modules/queueManager');
+const AudioManager = require('./modules/audioManager');
+const SpotifyHandler = require('./modules/spotifyHandler');
+
+console.log('[DEBUG] Đã tải các module quản lý.');
 
 const client = new Client({
     intents: [
-        GatewayIntentBits.Guilds,           // Bắt buộc cho Discord bot
-        GatewayIntentBits.GuildMessages,    // Để bot có thể đọc tin nhắn và tương tác cơ bản
-        GatewayIntentBits.GuildVoiceStates, // Để bot biết trạng thái kênh thoại
-        GatewayIntentBits.MessageContent,   // Cần thiết để đọc nội dung tin nhắn nếu bạn dùng tin nhắn thường
-        GatewayIntentBits.GuildMembers,     // Cần để quản lý thành viên (ví dụ: đếm số user chính xác)
-        GatewayIntentBits.GuildPresences    // Tùy chọn, để xem trạng thái online/offline của thành viên
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildPresences,
     ],
 });
 
-client.once('ready', () => {
-    console.log(`[DEBUG_MINIMAL] Bot TỐI GIẢN ĐÃ SẴN SÀNG! Đã đăng nhập với tên ${client.user.tag}`);
-    console.log(`[DEBUG_MINIMAL] Bot đang ở ${client.guilds.cache.size} server.`);
-    console.log('[DEBUG_MINIMAL] ✅ Triển khai có vẻ thành công!');
-    // Không cần dừng bot ở đây, để Render thấy bot online
+client.commands = new Collection();
+client.cooldowns = new Collection();
+client.queueManagers = new Collection(); // Lưu trữ các QueueManager cho mỗi Guild
+client.audioManagers = new Collection(); // Lưu trữ các AudioManager cho mỗi Guild
+client.spotifyHandler = SpotifyHandler;
+client.playingMessages = new Collection(); // Lưu trữ tin nhắn điều khiển nhạc (nếu bạn muốn dùng buttons)
+
+console.log('[DEBUG] Client Discord đã được khởi tạo.');
+
+// Tải Commands
+console.log('[DEBUG] Bắt đầu tải Commands...');
+try {
+    const commandFolders = readdirSync('./src/commands');
+    for (const folder of commandFolders) {
+        const subCommandFolders = readdirSync(`./src/commands/${folder}`);
+        for (const subFolder of subCommandFolders) {
+            const commandFiles = readdirSync(`./src/commands/${folder}/${subFolder}`).filter(file => file.endsWith('.js'));
+            for (const file of commandFiles) {
+                const command = require(`./commands/${folder}/${subFolder}/${file}`);
+                if (command.data) {
+                    client.commands.set(command.data.name, command);
+                } else {
+                    console.warn(`[COMMAND LOADER] Lệnh ${file} trong ${folder}/${subFolder} thiếu thuộc tính 'data'.`);
+                }
+            }
+        }
+    }
+    console.log(`[DEBUG] Đã tải ${client.commands.size} lệnh.`);
+} catch (error) {
+    console.error('[ERROR] Lỗi khi tải Commands:', error.message);
+    process.exit(1);
+}
+
+
+// Tải Events
+console.log('[DEBUG] Bắt đầu tải Events...');
+try {
+    const eventFiles = readdirSync('./src/events').filter(file => file.endsWith('.js'));
+    for (const file of eventFiles) {
+        const event = require(`./events/${file}`);
+        if (event.once) {
+            client.once(event.name, (...args) => event.execute(...args, client)); // KHÔNG TRUYỀN io
+        } else {
+            client.on(event.name, (...args) => event.execute(...args, client)); // KHÔNG TRUYỀN io
+        }
+    }
+    console.log('[DEBUG] Đã tải Events.');
+} catch (error) {
+    console.error('[ERROR] Lỗi khi tải Events:', error.message);
+    process.exit(1);
+}
+
+
+// Đăng nhập Discord
+console.log('[DEBUG] Bắt đầu đăng nhập Discord...');
+client.login(process.env.DISCORD_TOKEN).then(() => {
+    console.log('[DEBUG] Đã gọi client.login(), chờ sự kiện ready...');
+}).catch(err => {
+    console.error(`[ERROR] Lỗi khi đăng nhập Discord: ${err.message}. Vui lòng kiểm tra DISCORD_TOKEN.`);
+    process.exit(1);
 });
 
-client.login(process.env.DISCORD_TOKEN)
-    .then(() => {
-        console.log('[DEBUG_MINIMAL] Đã gọi client.login(), đang chờ sự kiện ready...');
-    })
-    .catch(error => {
-        console.error(`[ERROR_MINIMAL] Lỗi khi đăng nhập Discord: ${error.message}`);
-        console.error(`[ERROR_MINIMAL] Vui lòng kiểm tra lại DISCORD_TOKEN trong biến môi trường Render.`);
-        process.exit(1); // Thoát nếu lỗi đăng nhập
-    });
+// Xử lý lỗi không được bắt và promise bị từ chối
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('[ERROR] Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err, origin) => {
+    console.error('[ERROR] Uncaught Exception:', err);
+    process.exit(1);
+});
 
-console.log('[DEBUG_MINIMAL] Kết thúc file bot.js tối giản.');
-
-// Không có code cho Express, Socket.IO, Commands, Events (ngoại trừ ready)
-// Hoàn toàn không có logic phức tạp nào khác.
+// Cleanup on exit
+process.on('SIGINT', async () => {
+    console.log('[INFO] Đang tắt bot (SIGINT)...');
+    try {
+        for (const [guildId, audioManager] of client.audioManagers) {
+            await audioManager.stop();
+        }
+        client.destroy();
+        console.log('[INFO] Bot đã tắt thành công.');
+    } catch (cleanupErr) {
+        console.error('[ERROR] Lỗi trong quá trình tắt bot:', cleanupErr.message);
+    } finally {
+        process.exit(0);
+    }
+});
