@@ -1,11 +1,11 @@
 //...src/commands/music/play.js
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js'); // Loại bỏ ActionRowBuilder, ButtonBuilder, ButtonStyle
 const { createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const playdl = require('play-dl');
 const QueueManager = require('../../modules/queueManager');
 const AudioManager = require('../../modules/audioManager');
 const SpotifyHandler = require('../../modules/spotifyHandler');
-const { createMusicControlButtons } = require('../../events/interactionCreate'); // Import hàm tạo nút
+// KHÔNG IMPORT createMusicControlButtons NỮA
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -15,12 +15,12 @@ module.exports = {
             option.setName('query')
                 .setDescription('URL hoặc tên bài hát bạn muốn phát.')
                 .setRequired(true)),
-    async execute(interaction, client, io) {
+    async execute(interaction, client) { // KHÔNG TRUYỀN io NỮA
         const query = interaction.options.getString('query');
         const member = interaction.member;
         const guild = interaction.guild;
         const voiceChannel = member.voice.channel;
-        const textChannel = interaction.channel; // Kênh văn bản nơi lệnh được gọi
+        // KHÔNG CẦN textChannel NỮA (nếu không gửi buttons/embeds)
 
         if (!voiceChannel) {
             return interaction.reply({ content: 'Bạn phải ở trong kênh thoại để sử dụng lệnh này!', ephemeral: true });
@@ -32,8 +32,8 @@ module.exports = {
 
         await interaction.deferReply();
 
-        const queueManager = QueueManager.getOrCreate(guild.id, client, io);
-        const audioManager = AudioManager.getOrCreate(guild.id, client, io);
+        const queueManager = QueueManager.getOrCreate(guild.id, client); // KHÔNG TRUYỀN io NỮA
+        const audioManager = AudioManager.getOrCreate(guild.id, client); // KHÔNG TRUYỀN io NỮA
 
         try {
             await audioManager.join(voiceChannel);
@@ -41,7 +41,6 @@ module.exports = {
             let songsToAdd = [];
             let initialReplyContent = '';
 
-            // Xử lý các loại query khác nhau
             if (playdl.validate(query) === 'yt_video' || playdl.validate(query) === 'yt_playlist' || playdl.validate(query) === 'yt_channel') {
                 if (playdl.validate(query) === 'yt_playlist') {
                     const playlist = await playdl.playlist_info(query, { incomplete: true });
@@ -131,7 +130,6 @@ module.exports = {
                 }
             }
             else {
-                // Xử lý tìm kiếm bằng từ khóa
                 const searchResults = await playdl.search(query, { limit: 1 });
                 if (searchResults.length > 0) {
                     const ytInfo = await playdl.video_info(searchResults[0].url);
@@ -164,33 +162,14 @@ module.exports = {
                 queueManager.addSong(song);
             }
 
-            let playingMessage = null; // Biến để lưu trữ tin nhắn đang phát
-
-            // Nếu không có bài nào đang phát, bắt đầu phát bài đầu tiên trong hàng chờ
             if (!isPlaying && !currentSongInQueue) {
                 const firstSong = queueManager.getQueue()[0];
                 if (firstSong) {
                     await audioManager.play(firstSong);
-                    
-                    // Tạo embed và buttons cho bài hát đang phát
-                    const embed = new EmbedBuilder()
-                        .setColor('#0099ff')
-                        .setTitle('🎶 Đang phát')
-                        .setDescription(`**[${firstSong.info.title}](${firstSong.info.url})**\nNghệ sĩ: ${firstSong.info.artist || 'N/A'}\nAlbum: ${firstSong.info.album || 'N/A'}`)
-                        .setThumbnail(firstSong.info.thumbnail || null)
-                        .setTimestamp()
-                        .setFooter({ text: `Yêu cầu bởi ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() });
-
-                    const actionRow = createMusicControlButtons(true, queueManager.getLoopMode()); // isPlaying = true
-
-                    await interaction.editReply({ content: initialReplyContent, embeds: [embed], components: [actionRow] });
-                    playingMessage = await interaction.fetchReply(); // Lấy tin nhắn đã gửi để có thể cập nhật sau này
-
-                    // Cần lưu tin nhắn này để các tương tác nút bấm có thể cập nhật nó
-                    client.playingMessages.set(guild.id, playingMessage);
+                    await interaction.editReply(`Đang phát: **${firstSong.info.title}**`);
+                    // KHÔNG LƯU TIN NHẮN VÀ GỬI BUTTONS Ở ĐÂY NỮA
                 }
             } else {
-                // Nếu đã có nhạc đang phát, chỉ cần reply thông báo thêm bài và không gửi lại UI
                 await interaction.editReply(initialReplyContent);
             }
 
@@ -201,7 +180,6 @@ module.exports = {
     },
 };
 
-// Hàm định dạng thời lượng từ miligiây sang HH:MM:SS
 function formatDuration(ms) {
     const seconds = Math.floor((ms / 1000) % 60);
     const minutes = Math.floor((ms / (1000 * 60)) % 60);
