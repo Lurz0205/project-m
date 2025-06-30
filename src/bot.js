@@ -6,7 +6,6 @@ require('dotenv').config();
 console.log('[DEBUG] Bắt đầu khởi tạo bot.js (phiên bản tối giản)...');
 
 // Khởi tạo các module quản lý
-// KHÔNG CÓ EXPRESS, SOCKET.IO ở đây
 const QueueManager = require('./modules/queueManager');
 const AudioManager = require('./modules/audioManager');
 const SpotifyHandler = require('./modules/spotifyHandler');
@@ -26,28 +25,27 @@ const client = new Client({
 
 client.commands = new Collection();
 client.cooldowns = new Collection();
-client.queueManagers = new Collection(); // Lưu trữ các QueueManager cho mỗi Guild
-client.audioManagers = new Collection(); // Lưu trữ các AudioManager cho mỗi Guild
+client.queueManagers = new Collection();
+client.audioManagers = new Collection();
 client.spotifyHandler = SpotifyHandler;
-client.playingMessages = new Collection(); // Lưu trữ tin nhắn điều khiển nhạc (nếu bạn muốn dùng buttons)
+client.playingMessages = new Collection();
 
 console.log('[DEBUG] Client Discord đã được khởi tạo.');
 
 // Tải Commands
 console.log('[DEBUG] Bắt đầu tải Commands...');
 try {
-    const commandFolders = readdirSync('./src/commands');
-    for (const folder of commandFolders) {
-        const subCommandFolders = readdirSync(`./src/commands/${folder}`);
-        for (const subFolder of subCommandFolders) {
-            const commandFiles = readdirSync(`./src/commands/${folder}/${subFolder}`).filter(file => file.endsWith('.js'));
-            for (const file of commandFiles) {
-                const command = require(`./commands/${folder}/${subFolder}/${file}`);
-                if (command.data) {
-                    client.commands.set(command.data.name, command);
-                } else {
-                    console.warn(`[COMMAND LOADER] Lệnh ${file} trong ${folder}/${subFolder} thiếu thuộc tính 'data'.`);
-                }
+    const categoryFolders = readdirSync('./src/commands'); // Đọc các thư mục như 'general', 'music'
+    console.log(`[DEBUG] Tìm thấy ${categoryFolders.length} thư mục danh mục lệnh: ${categoryFolders.join(', ')}`);
+    for (const categoryFolder of categoryFolders) { // categoryFolder sẽ là 'general' hoặc 'music'
+        const commandFiles = readdirSync(`./src/commands/${categoryFolder}`).filter(file => file.endsWith('.js'));
+        console.log(`[DEBUG] Tìm thấy ${commandFiles.length} lệnh trong thư mục ${categoryFolder}.`);
+        for (const file of commandFiles) { // file sẽ là 'clear.js', 'play.js', v.v.
+            const command = require(`./commands/${categoryFolder}/${file}`); // Đường dẫn chính xác
+            if (command.data) {
+                client.commands.set(command.data.name, command);
+            } else {
+                console.warn(`[COMMAND LOADER] Lệnh ${file} trong ${categoryFolder} thiếu thuộc tính 'data'.`);
             }
         }
     }
@@ -65,9 +63,9 @@ try {
     for (const file of eventFiles) {
         const event = require(`./events/${file}`);
         if (event.once) {
-            client.once(event.name, (...args) => event.execute(...args, client)); // KHÔNG TRUYỀN io
+            client.once(event.name, (...args) => event.execute(...args, client));
         } else {
-            client.on(event.name, (...args) => event.execute(...args, client)); // KHÔNG TRUYỀN io
+            client.on(event.name, (...args) => event.execute(...args, client));
         }
     }
     console.log('[DEBUG] Đã tải Events.');
