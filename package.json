@@ -1,0 +1,23 @@
+{
+  "name": "project-m",
+  "version": "1.0.0",
+  "description": "Discord Music Bot - Project M",
+  "main": "src/bot.js", // Đảm bảo đúng đường dẫn file chính của bot
+  "scripts": {
+    "start": "node src/bot.js", // Lệnh để Render chạy ứng dụng
+    "deploy-commands": "node deploy-commands.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/voice": "^0.16.0",
+    "discord.js": "^14.x.x",
+    "dotenv": "^16.x.x",
+    "express": "^4.x.x",
+    "ffmpeg-static": "^5.x.x",
+    "play-dl": "^1.x.x",
+    "socket.io": "^4.x.x",
+    "spotify-web-api-node": "^5.x.x"
+  }
+}
